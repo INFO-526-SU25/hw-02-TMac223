@@ -1,30 +1,259 @@
 ---
-title: "HW 02"
-author: "INSERT YOUR NAME HERE"
+title: "HW-02"                  # Document title
+author: "Trevor Macdonald"      # Your name
+
 format: 
-  html:
-    embed-resources: true
-toc: true
+  html:                         # Output format: HTML
+    theme: cosmo                # Visual style theme (Bootswatch: cosmo)
+    toc: true                   # Enable table of contents
+    toc-depth: 2                # Show headers up to level 2 in TOC
+    code-fold: true             # Collapse code blocks by default
+    embed-resources: true       # Embed CSS, fonts, images
+    number-sections: true       # Number section headers
+
+execute:
+  warning: false                # Suppress warnings from code
+  error: false                  # Suppress code errors in output (use with caution)
+  message: false                # Suppress messages from packages/functions
 ---
+
+```{r}
+
+#| label: setup
+
+# Load and install essential libraries using pacman
+if (!require("pacman")) 
+  install.packages("pacman")
+
+pacman::p_load(
+  tidyverse,    # Core data manipulation and visualization packages
+  here,         # Simplifies file paths across systems
+  ggrepel,      # Smarter text labels in ggplot2
+  ggthemes,     # Additional themes for ggplot2
+  scales,       # Formatting for axes, labels, and legends
+  waffle,       # Waffle charts for categorical comparisons
+  countdown,    # Timer visuals (used for presentations)
+  openintro,    # Access to clean educational datasets
+  patchwork,    # Combine multiple ggplots easily
+  ggpmisc,      # Add equations, labels, and annotations to plots
+  ggridges,     # Ridge plots (joyplots) for distributions
+  dsbox,
+  fs,
+  janitor
+  
+)
+
+# Set the default ggplot2 theme for all plots
+ggplot2::theme_set(ggplot2::theme_minimal(base_size = 14))
+
+# Set global console output width
+options(width = 65)
+
+# Set global chunk options for knitting
+knitr::opts_chunk$set(
+  fig.width = 7,         # Figure width in inches
+  fig.asp = 0.618,       # Aspect ratio based on the golden ratio
+  fig.retina = 3,        # High-resolution images for retina displays
+  fig.align = "center",  # Center-align all figures
+  dpi = 300              # High resolution for all plots
+)
+```
 
 ## 1 - A new day, a new plot, a new geom
 
 ```{r}
-#| label: label-me-1
+
+#| label: Load Data 
+
+# Load dataset
+#edibnb <- dsbox::edibnb
+
+#edibnb |>
+  #slice_head(n = 10)
+
+#edibnb %>%
+  #summarise(across(everything(), ~ sum(is.na(.))))
+
+summary(edibnb$review_scores_rating)
 
 ```
+
+```{r}
+
+#| label: clean
+
+# Clean
+edibnb_clean <- edibnb |>
+  drop_na(neighbourhood, review_scores_rating) |>
+  group_by(neighbourhood) |>
+  mutate(
+    median_score = median(review_scores_rating)
+  ) |>
+  ungroup() |>
+  mutate(
+    neighbourhood = fct_reorder(neighbourhood, median_score)
+  )
+
+#example
+#ggplot(edibnb_clean, aes(x = review_scores_rating, y = neighbourhood)) +
+  #geom_density_ridges()
+
+```
+
+```{r}
+
+#| label: Airbnb Plot
+
+ggplot(edibnb_clean, aes(x = review_scores_rating, y = neighbourhood, fill = neighbourhood)) +
+  geom_density_ridges(
+    scale = 2, 
+    rel_min_height = 0.01, 
+    alpha = 0.7,
+    #quantiles = 2, quantile_lines = TRUE
+  ) +
+  scale_fill_viridis_d(option = "G", guide = "none") +
+  
+#scale_x_continuous(limits = c(50, 104), 
+  #breaks = seq(50, 104, 5)) +
+  
+scale_x_continuous(
+  limits = c(50, 104),
+  oob = scales::squish,
+  breaks = seq(50, 104, by = 5)
+) +
+
+   scale_y_discrete(expand = c(0, 0)) +
+  
+  labs(
+    title = "Edinburgh Airbnb Review Scores ",
+    x = "Review score (0–100)",
+    y = "Neighborhood",
+    caption = "Source:edibnb dataset"
+  ) 
+```
+
+Interpret:
 
 ## 2 - Foreign Connected PACs
 
 ```{r}
-#| label: label-me-2
+#| label: load data
+
+# get a list of files with "Foreign Connected PAC" in their names
+list_of_files <- dir_ls(path = "data", regexp = "Foreign Connected PAC")
+
+# read all files and row bind them
+# keeping track of the file name in a new column called year
+pac <- read_csv(list_of_files, id = "year")
+```
+
+```{r}
+#| label: clean
+
+#clean Names with janitor
+pac_janitor <- pac |>
+  clean_names()
+
+pac_clean <- pac_janitor |>
+  mutate(
+    # Clean currency columns and drop total
+    total  = NULL,
+    dems   = str_remove(dems, "\\$") |> as.numeric(),
+    repubs = str_remove(repubs, "\\$") |> as.numeric(),
+
+    # Extract the second year (e.g., "2000" from "1999-2000")
+    year = str_extract(year, "(?<=-)\\d{4}") |> as.integer()
+  ) |>
+  
+  # Split country and parent company
+  separate(
+    country_of_origin_parent_company,
+    into = c("country", "parent_company"),
+    sep = "/",
+    extra = "merge",
+    fill = "right"
+  )
+```
+
+```{r}
+#| label: step two
+
+pac_long <- pac_clean |>
+  pivot_longer(
+    cols = c(dems, repubs),# pivot on
+    names_to = "party",        
+    values_to = "amount"         
+  ) |>
+  mutate(
+    # Convert party names to title case
+    party = recode(party, dems = "Democrat", repubs = "Republican")
+  )
+
+#step three
+pac_uk <- pac_long |>
+  filter(country == "UK") |>
+  group_by(year, party) |>
+  summarise(
+    total_contributions = sum(amount),
+    .groups = "drop"
+  )
+```
+
+```{r}
+#| label Plot
+
+ggplot(pac_uk, aes(x = year, y = total_contributions, color = party)) +
+  geom_line(size = 1) +
+  scale_color_manual(
+    values = c("Democrat" = "blue", "Republican" = "red")
+  ) +
+  scale_y_continuous(labels = label_dollar(scale = 1e-6, suffix = "M")) +
+  labs(
+    title = "Contributions to US political parties from Canada-connected PACs",
+    x = "Year",
+    y = "Total amount",
+    color = "Party",
+    caption = "Source: "
+  ) +
+  theme(
+    legend.position = "bottom",
+    legend.title = element_text(size = 9),
+    legend.text = element_text(size = 9),
+    plot.title = element_text(hjust = 0.5),
+    plot.caption = element_text(hjust = 1, size =2)
+  )
+```
+
+```{r}
+
+ggplot(pac_uk, aes(x = year, y = total_contributions, color = party)) +
+  geom_line(size = 1.2) +  # Line thickness
+  scale_color_manual(
+    values = c("Democrat" = "blue", "Republican" = "red")
+  ) +
+  scale_y_continuous(
+    labels = label_dollar(scale = 1e-6, suffix = "M")  # "$1M", "$2M", etc.
+  ) +
+  labs(
+    title = "Contributions to US political parties from UK-connected PACs",
+    x = "Year",
+    y = "Total amount",
+    color = "Party",
+    caption = "Source: OpenSecrets.org"
+  ) +
+  theme_minimal(base_size = 14) +  # Match font size and minimal look
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "Right",
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 11),
+    plot.caption = element_text(hjust = 1, size = 10)
+  )
 
 ```
 
 ## 3 - Median housing prices in the US
 
-
 ## 4 - Expect More. Plot More.
-
 
 ## 5 - Mirror, mirror on the wall, who’s the ugliest of them all?
